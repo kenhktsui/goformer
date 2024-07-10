@@ -73,8 +73,7 @@ class GoGame:
 
                 # Check for captures
                 enemy_color = 'W' if self.current_player == 'B' else 'B'
-                captured_stones = self.check_captures(x, y, enemy_color)
-
+                captured_stones = self.check_captures(x, y, enemy_color, dryrun=False)
                 self.update_score(len(captured_stones))
                 self.record_move(x, y)
                 self.previous_board_state = copy.deepcopy(self.board)
@@ -92,7 +91,7 @@ class GoGame:
 
         # Check if the move captures any opponent stones
         enemy_color = 'W' if self.current_player == 'B' else 'B'
-        captures = self.check_captures(x, y, enemy_color)
+        captures = self.check_captures(x, y, enemy_color, dryrun=True)
 
         # Check if the placed stone has liberties
         has_liberties = self.has_liberties([(x, y)])
@@ -103,7 +102,7 @@ class GoGame:
         # The move is legal if it either captures stones or has liberties
         return len(captures) > 0 or has_liberties
 
-    def check_captures(self, x, y, color_to_capture):
+    def check_captures(self, x, y, color_to_capture, dryrun=False):
         captured_stones = []
         for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
             nx, ny = x + dx, y + dy
@@ -112,6 +111,9 @@ class GoGame:
                     group = self.find_group(nx, ny)
                     if not self.has_liberties(group):
                         captured_stones.extend(group)
+
+        if dryrun:
+            return captured_stones
 
         # Remove captured stones from the board
         for cx, cy in captured_stones:
