@@ -1,6 +1,5 @@
 import sys
 import logging
-import threading
 import copy
 import pygame
 from goformer.goformer import GoFormer, alphabets_wo_I
@@ -41,10 +40,9 @@ large_font = pygame.font.Font(None, 48)
 class GoGame:
     def __init__(self, player_color, komi):
         self.board = [[None for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
-        self.player_color = player_color
-        self.ai_color = "W" if player_color == "B" else "B"
-        self.current_player = "B"  # Black always starts
-        self.is_player_turn = (player_color == "B")  # Player's turn if they chose Black
+        self._player_color = player_color
+        self._ai_color = "W" if player_color == "B" else "B"
+        self._current_player = "B"  # Black always starts
         self.last_move = None
         self.ai_last_move = None
         self.passed = False
@@ -59,6 +57,34 @@ class GoGame:
         self.territory = {'B': 0, 'W': 0}
         self.resigned = False
         self.winner = None
+
+    @property
+    def player_color(self):
+        return self._player_color
+
+    @property
+    def ai_color(self):
+        return self._ai_color
+
+    @property
+    def current_player(self):
+        return self._current_player
+
+    def switch_player(self):
+        self._current_player = 'W' if self.current_player == 'B' else 'B'
+
+    @property
+    def is_player_turn(self):
+        return self.current_player == self.player_color
+
+    def start_turn(self):
+        """Prepare for the start of a new turn."""
+        pass
+
+    def end_turn(self):
+        """End the current turn and switch to the next player."""
+        self._current_player = 'W' if self._current_player == 'B' else 'B'
+        logging.debug(f"Ending turn. Next player: {self.current_player} (Player's turn: {self.is_player_turn})")
 
     def place_stone(self, x, y):
         if self.board[y][x] is None and not self.is_ko_violation(x, y):
@@ -77,7 +103,8 @@ class GoGame:
                 self.update_score(len(captured_stones))
                 self.record_move(x, y)
                 self.previous_board_state = copy.deepcopy(self.board)
-                self.switch_player()
+
+                self.end_turn()
                 logging.debug(f"Stone placed at ({x}, {y}) by {self.current_player}")
                 return True
             else:
@@ -170,11 +197,13 @@ class GoGame:
 
     def pass_turn(self):
         if self.passed:
+            print("Both players have passed. Ending game.")
             self.game_over = True
         else:
             self.passed = True
+            self.consecutive_passes += 1
             self.record_move(None, None)  # Record a pass
-            self.switch_player()
+            self.end_turn()
 
     def resign(self):
         self.game_over = True
@@ -182,9 +211,14 @@ class GoGame:
         self.winner = 'W' if self.current_player == 'B' else 'B'
         logging.info(f"Player {self.current_player} has resigned. {self.winner} wins.")
 
-    def switch_player(self):
-        self.current_player = 'W' if self.current_player == 'B' else 'B'
-        self.is_player_turn = (self.current_player == self.player_color)
+    def can_make_move(self):
+        """Check if the current player can make any legal move."""
+        for y in range(BOARD_SIZE):
+            for x in range(BOARD_SIZE):
+                if self.board[y][x] is None and not self.is_ko_violation(x, y):
+                    if self.is_legal_move(x, y):
+                        return True
+        return False
 
     def remove_captured_stones(self, x, y):
         captured = []
@@ -581,43 +615,63 @@ def update_display(game):
 
 
 def draw_last_move_indicator(last_move):
-    x, y = last_move
-    move_text = f"AI's last move: {alphabets_wo_I[x]}{BOARD_SIZE - y}"
+    if last_move == 'PASS':
+        move_text = "AI passed"
+    else:
+        x, y = last_move
+        move_text = f"AI's last move: {alphabets_wo_I[x]}{BOARD_SIZE - y}"
     text_surface = font.render(move_text, True, FONT_COLOR)
     screen.blit(text_surface, (10, HEIGHT - 80))
 
 
-def ai_turn(game, ai_bot):
+def handle_ai_turn(game, ai_bot):
     logging.debug("Starting AI turn")
     ai_move = ai_bot.make_move(game)
-    if ai_move:
-        logging.debug(f"AI attempting to place stone at {ai_move}")
+    logging.debug(f"AI attempting to place stone at {ai_move}")
+    if ai_move == "PASS":
+        game.pass_turn()
+        game.ai_last_move = "PASS"
+        return
+    elif ai_move == "resign":
+        game.resign()
+        game.ai_last_move = "resign"
+        return
+    else:
         if game.place_stone(*ai_move):
             logging.debug("AI successfully placed stone")
             game.ai_last_move = ai_move  # Update AI's last move
         else:
-            logging.error("AI failed to place stone, passing turn")
+            logging.error("AI failed to place stone in a legal position, deemed as passing turn")
             game.pass_turn()
-    else:
-        logging.debug("AI chose to pass")
-        game.pass_turn()
-    logging.debug("AI turn completed")
+            game.ai_last_move = "PASS"
+        return
 
 
-def make_ai_move(game, ai_bot):
-    logging.debug("Initiating AI move with timeout")
-    ai_thread = threading.Thread(target=ai_turn, args=(game, ai_bot))
-    ai_thread.start()
-    ai_thread.join(timeout=AI_TURN_TIMEOUT)
-    if ai_thread.is_alive():
-        logging.error("AI turn timed out, forcing a pass")
-        game.pass_turn()
-        # Attempt to stop the AI thread (This is a bit of a hack and not guaranteed to work)
-        try:
-            raise SystemExit
-        except:
-            pass
-    logging.debug("AI move (or timeout) completed")
+def handle_player_turn(game):
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            x, y = event.pos
+            board_x = (x - MARGIN) // CELL_SIZE
+            board_y = (y - MARGIN) // CELL_SIZE
+            if 0 <= board_x < BOARD_SIZE and 0 <= board_y < BOARD_SIZE:
+                if game.place_stone(board_x, board_y):
+                    return  # End turn after successful move
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_p:
+                game.pass_turn()
+                return  # End turn after pass
+            elif event.key == pygame.K_r:
+                game.resign()
+                return
+
+
+def print_game_state(game):
+    print(f"History: {game.get_move_history()}")
+    print(f"Current Player: {game.current_player}")
+    print(f"Player Turn: {game.is_player_turn}")
 
 
 def main():
@@ -638,45 +692,21 @@ def main():
             clock = pygame.time.Clock()
 
             while not game.game_over:
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        pygame.quit()
-                        sys.exit()
-                    elif event.type == pygame.MOUSEBUTTONDOWN and game.is_player_turn:
-                        x, y = event.pos
-                        board_x = (x - MARGIN) // CELL_SIZE
-                        board_y = (y - MARGIN) // CELL_SIZE
-                        if (
-                            0 <= board_x < BOARD_SIZE
-                            and 0 <= board_y < BOARD_SIZE
-                            and game.place_stone(board_x, board_y)
-                        ):
-                            # Render the player's move immediately
-                            update_display(game)
-                            if not game.game_over:
-                                pygame.time.wait(500)
-                                # AI's turn after player's move
-                                make_ai_move(game, ai_bot)
-                    elif event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_p and game.is_player_turn:  # Pass
-                            game.pass_turn()
-                            update_display(game)
-                            if not game.game_over:
-                                pygame.time.wait(500)
-                                # AI's turn after player passes
-                                make_ai_move(game, ai_bot)
-                        elif event.key == pygame.K_r:  # Resign
-                            game.resign()
-                        elif event.key == pygame.K_h:  # Print move history
-                            print(game.get_move_history())
-
-                if not game.is_player_turn and not game.game_over:
-                    make_ai_move(game, ai_bot)
-
+                game.start_turn()
                 update_display(game)
+
+                if game.is_player_turn:
+                    handle_player_turn(game)
+                else:
+                    handle_ai_turn(game, ai_bot)
+
+                if game.consecutive_passes == 2 or not game.can_make_move():
+                    game.end_game()
+
                 clock.tick(60)
 
             game.end_game()
+            print_game_state(game)
             restart, exit_game = show_end_game_screen(game)
             if exit_game:
                 pygame.quit()
