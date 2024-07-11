@@ -7,10 +7,11 @@ With the recent advancement of large language model in transformer[5] based deco
 
 
 Can GoFormer perform reasonably well just by next move (token) prediction, without MCTS[3][4]? Let's find out.
-My research goals are that: 
+My research goals are that:
 - if language model can reason and plan, it can play Go very well.
 - if GoFormer can perform reasonably well, it can be used as a baseline for future research in Go game, without the use of tree search.
 - does language model needs MCTS to play Go well?
+- Go game is a game of reasoning and planning, and it is a good testbed for language model because result is measurable. Model architecture can be tested and compared.
 
 ## GoFormer Model
 The first version of model is in Huggingface 🤗[kenhktsui/goformer-v0.1](https://huggingface.co/kenhktsui/goformer-v0.1).
@@ -27,6 +28,14 @@ pip install -r requirements.txt
 ```shell
 python -m go_transformer.game
 ```
+
+## Compilation
+
+```shell
+# You will need to install pyinstaller
+pyinstaller --onefile -w goformer/game.py
+```
+
 ![logo](./static/demo.gif)
 mouse click on the board to make a move;  
 R to resign;  
